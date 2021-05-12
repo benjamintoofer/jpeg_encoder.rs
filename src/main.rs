@@ -1,11 +1,83 @@
-use image::{self, GenericImageView, Pixel};
+use std::borrow::BorrowMut;
+
+use image::{self, EncodableLayout, GenericImageView, Pixel};
 use ndarray::arr2;
+
+use rustdct::{Dct2, Dct3, Dst2};
+use rustdct::algorithm::type2and3_butterflies::Type2And3Butterfly8;
 
 /**
 TODO (benjamintoofer@gmail.com)
 Consider using ndarray library with blas for optimal vector operations
 Record performance difference
 */
+const BLOCK_SIZE: usize = 8usize;
+
+const Q_50_luma: [[ u32; 8]; 8] = [
+    [16, 11, 10, 16, 24, 40, 51, 61],
+    [12, 12, 14, 19, 26, 58, 60, 55],
+    [14, 13, 16, 24, 40, 57, 69, 56],
+    [14, 17, 22, 29, 51, 87, 80, 62],
+    [18, 22, 37, 56, 68, 109, 103, 77],
+    [24, 35, 55, 64, 81, 104, 113, 92],
+    [49, 64, 78, 87, 103, 121, 120, 101],
+    [72, 92, 95, 98, 112, 100, 103, 99]
+];
+
+const Q_50_chroma: [[ u32; 8]; 8] = [
+    [17, 18, 24, 47, 99, 99, 99, 99],
+    [18, 21, 26, 66, 99, 99, 99, 99],
+    [24, 26, 56, 99, 99, 99, 99, 99],
+    [47, 66, 99, 99, 99, 99, 99, 99],
+    [99, 99, 99, 99, 99, 99, 99, 99],
+    [99, 99, 99, 99, 99, 99, 99, 99],
+    [99, 99, 99, 99, 99, 99, 99, 99],
+    [99, 99, 99, 99, 99, 99, 99, 99]
+];
+
+const S: [f32; 8] = [
+	0.353553390593273762200422,
+	0.254897789552079584470970,
+	0.270598050073098492199862,
+	0.300672443467522640271861,
+	0.353553390593273762200422,
+	0.449988111568207852319255,
+	0.653281482438188263928322,
+	1.281457723870753089398043,
+];
+
+const A: [f32; 6] = [
+	std::f32::NAN,
+	0.707106781186547524400844,
+	0.541196100146196984399723,
+	0.707106781186547524400844,
+	1.306562964876376527856643,
+	0.382683432365089771728460,
+];
+enum SubsampleType {
+    V4_4_4,
+    V4_2_2,
+    V4_2_0
+}
+
+impl SubsampleType {
+    pub fn get_row_divisor(&self) -> u8 {
+        match self {
+            SubsampleType::V4_4_4 => {1}
+            SubsampleType::V4_2_2 => {2}
+            SubsampleType::V4_2_0 => {2}
+        }
+    }
+
+    pub fn get_col_divisor(&self) -> u8 {
+        match self {
+            SubsampleType::V4_4_4 => {1}
+            SubsampleType::V4_2_2 => {1}
+            SubsampleType::V4_2_0 => {2}
+        }
+    }
+}
+
 fn main() {
     println!("Hello, world!");
     let file = "./assets/image_1.jpg";
@@ -14,18 +86,74 @@ fn main() {
     println!("{:?}", img.dimensions());
     println!("{:?}", img.color());
     println!("{:?}", img.as_bytes().len());
-    let pixel = img.get_pixel(0, 0);
-    println!("PIXEL: {:?}", pixel.0);
-    println!("PIXEL: {:?}", pixel.channels());
-    let channel = pixel.channels();
-    let ycrcb_vector = rgb_2_ycrcb(channel[0], channel[1], channel[2]);
-    println!("ycrcb: {:?}", ycrcb_vector);
-    println!("rgb: {:?}", ycrcb_2_rgb(ycrcb_vector[0], ycrcb_vector[1], ycrcb_vector[2]));
+
+    // This will be used to grab 64 pixels at a time
+    // let rgb_image = img.into_rgb8();
+    // let temp = rgb_image.as_bytes();
+    // let mut y_prime:[[ f32; 8]; 8] = [[0f32; 8]; 8];
+    // let mut y_prime:[ f32; 8] = [0f32; 8];
+    let mut y_prime:[[ f32; 8]; 8] = [
+	     [-64., -68., -71., -72., -80., -81., -81., -85.],
+	     [-67., -70., -75., -76., -80., -79., -76., -75.],
+	     [-61., -68., -75., -75., -79., -81., -80., -74.],
+	     [-60., -67., -65., -65., -66., -63., -63., -64.],
+	     [-57., -67., -58., -65., -59., -54., -40., -40.],
+	     [-45., -36., -26., -23., -21., -17., -18., -13.],
+	     [-33., -20., -20., -4., -6., 2., 0., 0.],
+	     [-21., -10., -3., 6., 9., 14., 13., 9.]
+	    ];
+    // for i in 0usize..64 {
+    //     let row = i / 8;
+    //     let col = i % 8;
+    //     let pixel = img.get_pixel(row as u32, col as u32);
+    //     let channel = pixel.channels();
+    //     let ycrcb_vector: [f32; 3] = rgb_2_ycrcb(channel[0], channel[1], channel[2]);
+    //     y_prime[row][col] = ycrcb_vector[0] - 128f32;
+    // }
+    // println!("PIXEL: {:?}", pixel.0);
+    // println!("PIXEL: {:?}", pixel.channels());
+    // let channel = pixel.channels();
+    // let ycrcb_vector = rgb_2_ycrcb(channel[0], channel[1], channel[2]);
+    // println!("ycrcb: {:?}", ycrcb_vector);
+    // println!("rgb: {:?}", ycrcb_2_rgb(ycrcb_vector[0], ycrcb_vector[1], ycrcb_vector[2]));
+
+    let mut input = [0f32; 8];
+    let mut intermediate = [5f32; 8];
+    let mut output = [0f32; 8];
+    
+    // let dct = Type2And3Butterfly8::new();
+    // println!("OUTPUT {:?}", y_prime);
+    // dct.process_dct2(&mut y_prime);
+    // dct.process_dct2_with_scratch(&mut y_prime, &mut intermediate);
+    // dct.process_dct3_with_scratch(&mut intermediate, &mut output);
+
+    // println!("BEFORE {:?}", y_prime);
+    let mut transposed: [[ f32; 8]; 8] = [[ 0f32; 8]; 8];
+    let mut transoformed: [[ f32; 8]; 8] = [[ 0f32; 8]; 8];
+    for (i, elem) in y_prime.into_iter().enumerate() {
+        transoformed[i] = transform(&elem);
+    }
+    println!("AFTER {:?}", transoformed);
+    transpose(&transoformed, &mut transposed);
+    println!("TRANSPOSE {:?}", transposed);
+    for (i, elem) in transposed.into_iter().enumerate() {
+        transoformed[i] = transform(&elem);
+    }
+     transpose(&transoformed, &mut transposed);
+    println!("\n\nDONE {:?}", transposed);
 }
 
 fn compress_jpeg_brute() {
     // Iterate through each pixel and convert from RGB -> YCrCb
 
+}
+
+fn transpose(matrix: &[[ f32; BLOCK_SIZE]; BLOCK_SIZE], new_matrix: &mut [[ f32; 8]; 8]) {
+    for i in 0..BLOCK_SIZE {
+        for j in 0..BLOCK_SIZE {
+            new_matrix[j][i] = matrix[i][j];
+        }
+    }
 }
 
 
@@ -59,6 +187,10 @@ fn ycrcb_2_rgb(y:f32, cr:f32, cb: f32)-> [f32; 3] {
     multiply(matrix_rgb_2_ycrcb, temp)
 }
 
+fn down_sample() -> u32 {
+    0
+}
+
 fn multiply(matrix: &'static [[f32; 3]; 3], vector:[f32; 3]) -> [f32; 3] {
     return [
         ((matrix[0][0] * vector[0]) + (matrix[0][1] * vector[1]) + (matrix[0][2] * vector[2])),
@@ -84,9 +216,91 @@ fn subtract(vector_a: [f32; 3], vector_b: [f32; 3]) -> [f32; 3] {
 }
 
 fn apply_discrete_cosine_transform() -> u8 {
+
+    // Input is 8 X 8 pixel block of eithe y, Cr, cb
+
+    // Shift by -128 to change scale from 0 - 255 -> -128 - 128 (For cosine
+    
+    // Get DCT 2 coefficients. ITs a contribution of each frequency block with some weight (the coefficient)
     0
 }
 
 fn compress_jpeg_optimal() {
 
 }
+
+fn generate_quantize_table_quality(table: [[ u32; 8]; 8], quality: u32, new_table: &mut [[ u32; 8]; 8]) {
+    if quality < 50 {
+        for i in 0..BLOCK_SIZE {
+            for j in 0..BLOCK_SIZE {
+                new_table[j][i] = table[i][j] * (50 / quality);
+            }
+        }
+    } else {
+        for i in 0..BLOCK_SIZE {
+            for j in 0..BLOCK_SIZE {
+                new_table[j][i] = table[i][j] * ((100 - quality) / 50);
+            }
+        }
+    }
+}
+
+fn divide_matrix(matrix_a: &[[ u32; BLOCK_SIZE]; BLOCK_SIZE], matrix_b: &[[ u32; BLOCK_SIZE]; BLOCK_SIZE], matrix_buffer: &mut [[ u32; BLOCK_SIZE]; BLOCK_SIZE]) {
+    for i in 0..BLOCK_SIZE {
+        for j in 0..BLOCK_SIZE {
+            matrix_buffer[i][j] = matrix_a[i][j] / matrix_b[i][j];
+        }
+    }
+}
+
+fn transform(vector: &[f32; 8]) -> [f32; 8] {
+	// Algorithm by Arai, Agui, Nakajima, 1988. For details, see:
+	// https://web.stanford.edu/class/ee398a/handouts/lectures/07-TransformCoding.pdf#page=30
+    let mut output: [f32; 8] = [0f32; 8];
+	let v0 = vector[0] + vector[7];
+	let v1 = vector[1] + vector[6];
+	let v2 = vector[2] + vector[5];
+	let v3 = vector[3] + vector[4];
+	let v4 = vector[3] - vector[4];
+	let v5 = vector[2] - vector[5];
+	let v6 = vector[1] - vector[6];
+	let v7 = vector[0] - vector[7];
+	
+	let v8 = v0 + v3;
+	let v9 = v1 + v2;
+	let v10 = v1 - v2;
+	let v11 = v0 - v3;
+	let v12 = -v4 - v5;
+	let v13 = (v5 + v6) * A[3];
+	let v14 = v6 + v7;
+	
+	let v15 = v8 + v9;
+	let v16 = v8 - v9;
+	let v17 = (v10 + v11) * A[1];
+	let v18 = (v12 + v14) * A[5];
+	
+	let v19 = -v12 * A[2] - v18;
+	let v20 = v14 * A[4] - v18;
+	
+	let v21 = v17 + v11;
+	let v22 = v11 - v17;
+	let v23 = v13 + v7;
+	let v24 = v7 - v13;
+	
+	let v25 = v19 + v24;
+	let v26 = v23 + v20;
+	let v27 = v23 - v20;
+	let v28 = v24 - v19;
+	
+	output[0] = S[0] * v15;
+	output[1] = S[1] * v26;
+	output[2] = S[2] * v21;
+	output[3] = S[3] * v28;
+	output[4] = S[4] * v16;
+	output[5] = S[5] * v25;
+	output[6] = S[6] * v22;
+	output[7] = S[7] * v27;
+
+    output
+}
+
