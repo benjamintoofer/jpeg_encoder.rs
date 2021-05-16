@@ -1,10 +1,5 @@
-use std::borrow::BorrowMut;
-
 use image::{self, EncodableLayout, GenericImageView, Pixel};
 use ndarray::arr2;
-
-use rustdct::{Dct2, Dct3, Dst2};
-use rustdct::algorithm::type2and3_butterflies::Type2And3Butterfly8;
 
 /**
 TODO (benjamintoofer@gmail.com)
@@ -13,7 +8,7 @@ Record performance difference
 */
 const BLOCK_SIZE: usize = 8usize;
 
-const Q_50_luma: [[ u32; 8]; 8] = [
+const Q_50_luma: [[ i32; 8]; 8] = [
     [16, 11, 10, 16, 24, 40, 51, 61],
     [12, 12, 14, 19, 26, 58, 60, 55],
     [14, 13, 16, 24, 40, 57, 69, 56],
@@ -24,7 +19,7 @@ const Q_50_luma: [[ u32; 8]; 8] = [
     [72, 92, 95, 98, 112, 100, 103, 99]
 ];
 
-const Q_50_chroma: [[ u32; 8]; 8] = [
+const Q_50_chroma: [[ i32; 8]; 8] = [
     [17, 18, 24, 47, 99, 99, 99, 99],
     [18, 21, 26, 66, 99, 99, 99, 99],
     [24, 26, 56, 99, 99, 99, 99, 99],
@@ -82,10 +77,10 @@ fn main() {
     println!("Hello, world!");
     let file = "./assets/image_1.jpg";
 
-    let img = image::open(file).unwrap();
-    println!("{:?}", img.dimensions());
-    println!("{:?}", img.color());
-    println!("{:?}", img.as_bytes().len());
+    // let img = image::open(file).unwrap();
+    // println!("{:?}", img.dimensions());
+    // println!("{:?}", img.color());
+    // println!("{:?}", img.as_bytes().len());
 
     // This will be used to grab 64 pixels at a time
     // let rgb_image = img.into_rgb8();
@@ -93,15 +88,18 @@ fn main() {
     // let mut y_prime:[[ f32; 8]; 8] = [[0f32; 8]; 8];
     // let mut y_prime:[ f32; 8] = [0f32; 8];
     let mut y_prime:[[ f32; 8]; 8] = [
-	     [-64., -68., -71., -72., -80., -81., -81., -85.],
-	     [-67., -70., -75., -76., -80., -79., -76., -75.],
-	     [-61., -68., -75., -75., -79., -81., -80., -74.],
-	     [-60., -67., -65., -65., -66., -63., -63., -64.],
-	     [-57., -67., -58., -65., -59., -54., -40., -40.],
-	     [-45., -36., -26., -23., -21., -17., -18., -13.],
-	     [-33., -20., -20., -4., -6., 2., 0., 0.],
-	     [-21., -10., -3., 6., 9., 14., 13., 9.]
-	    ];
+        [-64., -68., -71., -72., -80., -81., -81., -85.],
+        [-67., -70., -75., -76., -80., -79., -76., -75.],
+        [-61., -68., -75., -75., -79., -81., -80., -74.],
+        [-60., -67., -65., -65., -66., -63., -63., -64.],
+        [-57., -67., -58., -65., -59., -54., -40., -40.],
+        [-45., -36., -26., -23., -21., -17., -18., -13.],
+        [-33., -20., -20., -4., -6., 2., 0., 0.],
+        [-21., -10., -3., 6., 9., 14., 13., 9.]
+    ];
+    let mut buff = [0i32; 64];
+    get_zigzag(&Q_50_luma, &mut buff);
+    println!("BUFF {:?}", buff);
     // for i in 0usize..64 {
     //     let row = i / 8;
     //     let col = i % 8;
@@ -129,18 +127,26 @@ fn main() {
 
     // println!("BEFORE {:?}", y_prime);
     let mut transposed: [[ f32; 8]; 8] = [[ 0f32; 8]; 8];
-    let mut transoformed: [[ f32; 8]; 8] = [[ 0f32; 8]; 8];
+    let mut transformed: [[ f32; 8]; 8] = [[ 0f32; 8]; 8];
     for (i, elem) in y_prime.into_iter().enumerate() {
-        transoformed[i] = transform(&elem);
+        transformed[i] = transform(&elem);
     }
-    println!("AFTER {:?}", transoformed);
-    transpose(&transoformed, &mut transposed);
+    println!("AFTER {:?}", transformed);
+    transpose(&transformed, &mut transposed);
     println!("TRANSPOSE {:?}", transposed);
     for (i, elem) in transposed.into_iter().enumerate() {
-        transoformed[i] = transform(&elem);
+        transformed[i] = transform(&elem);
     }
-     transpose(&transoformed, &mut transposed);
+    transpose(&transformed, &mut transposed);
     println!("\n\nDONE {:?}", transposed);
+
+    let mut luma_quantized_matrix:[[ i32; 8]; 8] = [[ 0i32; 8]; 8];
+    let mut chroma_quantized_matrix:[[ i32; 8]; 8] = [[ 0i32; 8]; 8];
+    generate_quantize_table_quality(Q_50_luma, 50, &mut luma_quantized_matrix);
+    // generate_quantize_table_quality(Q_50_chroma, 50, &mut chroma_quantized_matrix);
+
+    divide_matrix(&transposed, &luma_quantized_matrix, &mut chroma_quantized_matrix);
+    println!("\n\nDONE {:?}", chroma_quantized_matrix);
 }
 
 fn compress_jpeg_brute() {
@@ -228,8 +234,53 @@ fn apply_discrete_cosine_transform() -> u8 {
 fn compress_jpeg_optimal() {
 
 }
+struct JPEGData {
+    amplitude: u8,
+    run_length: u8,
+    size: u8,
+}
 
-fn generate_quantize_table_quality(table: [[ u32; 8]; 8], quality: u32, new_table: &mut [[ u32; 8]; 8]) {
+impl JPEGData {
+    pub fn to_byte_pair() -> u16 {
+        0
+    }
+}
+fn entropy_encoding(previous_dc: i32, block: [[ i32; 8]; 8]) {
+    let mut buffer: [i32; 64] = [0i32; 64];
+    let temp = get_zigzag(&block, &mut buffer);
+}
+
+fn get_zigzag(block: &[[ i32; 8]; 8], buffer: &mut [i32; 64]) {
+    let sum_limit = (BLOCK_SIZE * 2) - 1;
+    let limit = BLOCK_SIZE - 1;
+    let mut i = 0;
+    let mut col: usize;
+    let mut row: usize;
+    let mut buffer_index = 0;
+    while i < sum_limit {
+        if i % 2 == 0 {
+            row = usize::min(i, limit);
+            col = i - row;
+        } else {
+            col = usize::min(i, limit);
+            row = i - col;
+        }
+        let mut j = 0;
+        let index_limit = usize::min(i, (limit * 2) - i);
+        while j <= index_limit {
+            if i % 2 == 0 {
+                buffer[buffer_index] = block[row - j][col + j];
+            } else {
+                buffer[buffer_index] = block[row + j][col - j];
+            }
+            buffer_index = buffer_index + 1;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn generate_quantize_table_quality(table: [[ i32; 8]; 8], quality: i32, new_table: &mut [[ i32; 8]; 8]) {
     if quality < 50 {
         for i in 0..BLOCK_SIZE {
             for j in 0..BLOCK_SIZE {
@@ -245,15 +296,15 @@ fn generate_quantize_table_quality(table: [[ u32; 8]; 8], quality: u32, new_tabl
     }
 }
 
-fn divide_matrix(matrix_a: &[[ u32; BLOCK_SIZE]; BLOCK_SIZE], matrix_b: &[[ u32; BLOCK_SIZE]; BLOCK_SIZE], matrix_buffer: &mut [[ u32; BLOCK_SIZE]; BLOCK_SIZE]) {
+fn divide_matrix(matrix_a: &[[ f32; BLOCK_SIZE]; BLOCK_SIZE], matrix_b: &[[ i32; BLOCK_SIZE]; BLOCK_SIZE], matrix_buffer: &mut [[ i32; BLOCK_SIZE]; BLOCK_SIZE]) {
     for i in 0..BLOCK_SIZE {
         for j in 0..BLOCK_SIZE {
-            matrix_buffer[i][j] = matrix_a[i][j] / matrix_b[i][j];
+            matrix_buffer[i][j] = matrix_a[i][j] as i32 / matrix_b[i][j];
         }
     }
 }
 
-fn transform(vector: &[f32; 8]) -> [f32; 8] {
+fn transform(vector: &[f32; BLOCK_SIZE]) -> [f32; BLOCK_SIZE] {
 	// Algorithm by Arai, Agui, Nakajima, 1988. For details, see:
 	// https://web.stanford.edu/class/ee398a/handouts/lectures/07-TransformCoding.pdf#page=30
     let mut output: [f32; 8] = [0f32; 8];
