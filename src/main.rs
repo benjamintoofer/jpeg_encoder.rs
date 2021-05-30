@@ -1,5 +1,11 @@
+use std::fs;
+
 use image::{self, EncodableLayout, GenericImageView, Pixel};
 use ndarray::arr2;
+
+pub mod jpeg;
+pub mod decoder;
+pub mod markers;
 
 /**
 TODO (benjamintoofer@gmail.com)
@@ -75,8 +81,12 @@ impl SubsampleType {
 
 fn main() {
     println!("Hello, world!");
-    let file = "./assets/image_1.jpg";
+    let file_path = "./assets/fanta_image.jpg";
 
+    let file = fs::read(file_path);
+     if let Ok(image_data) = file {
+         decoder::Decoder::decode(&image_data);
+     }
     // let img = image::open(file).unwrap();
     // println!("{:?}", img.dimensions());
     // println!("{:?}", img.color());
@@ -97,9 +107,9 @@ fn main() {
         [-33., -20., -20., -4., -6., 2., 0., 0.],
         [-21., -10., -3., 6., 9., 14., 13., 9.]
     ];
-    let mut buff = [0i32; 64];
-    get_zigzag(&Q_50_luma, &mut buff);
-    println!("BUFF {:?}", buff);
+    // let mut buff = [0i32; 64];
+    // get_zigzag(&Q_50_luma, &mut buff);
+    // println!("BUFF {:?}", buff);
     // for i in 0usize..64 {
     //     let row = i / 8;
     //     let col = i % 8;
@@ -126,27 +136,27 @@ fn main() {
     // dct.process_dct3_with_scratch(&mut intermediate, &mut output);
 
     // println!("BEFORE {:?}", y_prime);
-    let mut transposed: [[ f32; 8]; 8] = [[ 0f32; 8]; 8];
-    let mut transformed: [[ f32; 8]; 8] = [[ 0f32; 8]; 8];
-    for (i, elem) in y_prime.into_iter().enumerate() {
-        transformed[i] = transform(&elem);
-    }
-    println!("AFTER {:?}", transformed);
-    transpose(&transformed, &mut transposed);
-    println!("TRANSPOSE {:?}", transposed);
-    for (i, elem) in transposed.into_iter().enumerate() {
-        transformed[i] = transform(&elem);
-    }
-    transpose(&transformed, &mut transposed);
-    println!("\n\nDONE {:?}", transposed);
+    // let mut transposed: [[ f32; 8]; 8] = [[ 0f32; 8]; 8];
+    // let mut transformed: [[ f32; 8]; 8] = [[ 0f32; 8]; 8];
+    // for (i, elem) in y_prime.into_iter().enumerate() {
+    //     transformed[i] = transform(&elem);
+    // }
+    // println!("AFTER {:?}", transformed);
+    // transpose(&transformed, &mut transposed);
+    // println!("TRANSPOSE {:?}", transposed);
+    // for (i, elem) in transposed.into_iter().enumerate() {
+    //     transformed[i] = transform(&elem);
+    // }
+    // transpose(&transformed, &mut transposed);
+    // println!("\n\nDONE {:?}", transposed);
 
-    let mut luma_quantized_matrix:[[ i32; 8]; 8] = [[ 0i32; 8]; 8];
-    let mut chroma_quantized_matrix:[[ i32; 8]; 8] = [[ 0i32; 8]; 8];
-    generate_quantize_table_quality(Q_50_luma, 50, &mut luma_quantized_matrix);
-    // generate_quantize_table_quality(Q_50_chroma, 50, &mut chroma_quantized_matrix);
+    // let mut luma_quantized_matrix:[[ i32; 8]; 8] = [[ 0i32; 8]; 8];
+    // let mut chroma_quantized_matrix:[[ i32; 8]; 8] = [[ 0i32; 8]; 8];
+    // generate_quantize_table_quality(Q_50_luma, 50, &mut luma_quantized_matrix);
+    // // generate_quantize_table_quality(Q_50_chroma, 50, &mut chroma_quantized_matrix);
 
-    divide_matrix(&transposed, &luma_quantized_matrix, &mut chroma_quantized_matrix);
-    println!("\n\nDONE {:?}", chroma_quantized_matrix);
+    // divide_matrix(&transposed, &luma_quantized_matrix, &mut chroma_quantized_matrix);
+    // println!("\n\nDONE {:?}", chroma_quantized_matrix);
 }
 
 fn compress_jpeg_brute() {
