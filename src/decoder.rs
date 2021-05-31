@@ -1,7 +1,7 @@
 // NOTE (benjamintoofer@gmail.com): Only support for baseline parsing
 use std::convert::TryInto;
 
-use crate::{jpeg::{Header, QuantizationTable, ImageComponent, FrameHeader}, markers::{MARKER_START, SOI, EOI, APP0, DQT, SOF0}};
+use crate::{jpeg::{FrameHeader, Header, HuffmanTable, ImageComponent, QuantizationTable}, markers::{MARKER_START, SOI, EOI, APP0, DQT, SOF0, DHT}};
 
 #[derive(Debug)]
 pub struct Decoder {
@@ -51,7 +51,12 @@ impl Decoder {
                 let frame_header_data = &image_data[new_offset..(new_offset + length as usize)];
                 let frame_header  = read_frame_header(&frame_header_data)?;
                 jpeg_header.frame_header = Some(frame_header);
-                break;
+            }
+
+            if second_byte == DHT {
+                let new_offset = offset + 2;
+                let huffman_table_data = &image_data[new_offset..(new_offset + length as usize)];
+                read_huffman_table(&huffman_table_data)?;
             }
 
             offset = offset + length as usize + 2;
@@ -98,6 +103,7 @@ fn read_quantization_table<'a>(quantization_data: &'a[u8]) -> Result<Vec<Quantiz
 }
 
 fn read_frame_header<'a>(frame_header_data: &'a[u8]) -> Result<FrameHeader, String> { 
+    println!("READ ================> SOF0");
     let mut offset = 2usize;
     if frame_header_data[offset] != 8 {
         return Err("read_frame_header: Unsupported JPEG: Only support 8 bit precision, not 16".to_string());
@@ -128,4 +134,22 @@ fn read_frame_header<'a>(frame_header_data: &'a[u8]) -> Result<FrameHeader, Stri
         num_of_samples_per_line,
         image_components,
     })
+}
+
+fn read_huffman_table(huffman_data: &[u8]) -> Result<u32, String> {
+    println!("READ ================> DHT");
+    let mut offset = 2usize;
+    let table_class = (huffman_data[offset] & 0xF0) >> 4;
+    let huffman_id = huffman_data[offset] & 0xF;
+    println!("TABLE CLASS: {}; HUFFMAN ID: {}", table_class, huffman_id);
+
+    offset += 1;
+    let num_of_huffman = huffman_data[offset];
+    println!("NUM OF HUFF: {}", num_of_huffman);
+    Ok(0)
+}
+
+fn read_scan_header(scan_data: &[u8])-> Result<u32, String> {
+
+    Ok(0)
 }
