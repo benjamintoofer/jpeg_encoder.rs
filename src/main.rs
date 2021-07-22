@@ -85,7 +85,11 @@ fn main() {
 
     let file = fs::read(file_path);
      if let Ok(image_data) = file {
-         decoder::Decoder::decode(&image_data);
+        let result = decoder::Decoder::decode(image_data);
+        match result {
+            Ok(res) => {println!("{}", res)}
+            Err(err) => {println!("{}", err)}
+        }
      }
     // let img = image::open(file).unwrap();
     // println!("{:?}", img.dimensions());

@@ -1,7 +1,7 @@
 // NOTE (benjamintoofer@gmail.com): Only support for baseline parsing
 use std::convert::TryInto;
 
-use crate::{jpeg::{FrameHeader, Header, HuffmanTable, ImageComponent, QuantizationTable}, markers::{MARKER_START, SOI, EOI, APP0, DQT, SOF0, DHT}};
+use crate::{jpeg::{FrameHeader, Header, HuffmanTable, ImageComponent, QuantizationTable}, markers::{MARKER_START, SOI, EOI, APP0, DQT, SOF0, DHT, SOS}};
 
 #[derive(Debug)]
 pub struct Decoder {
@@ -10,7 +10,7 @@ pub struct Decoder {
 
 impl Decoder {
     /// Decode a jpeg image to generate a bmp
-    pub fn decode(image_data: &[u8]) -> Result<u32, String> {
+    pub fn decode<'a>(image_data: Vec<u8>) -> Result<u32, String> {
         let mut jpeg_header: Header = Header::new();
         let mut offset = 0usize;
         // Start by verifying that the SOI is the first byte pair
@@ -39,10 +39,11 @@ impl Decoder {
 
             if second_byte == DQT {
                 let new_offset = offset + 2;
-                let quantization_data = &image_data[new_offset..(new_offset + length as usize)];
-                let qts = read_quantization_table(quantization_data)?;
-                for qt in qts {
-                     jpeg_header.qt[qt.table_id as usize] = Some(qt)
+                let quantization_data: &[u8] = &image_data[new_offset..(new_offset + length as usize)];
+                let qts: Vec<QuantizationTable> = read_quantization_table(quantization_data)?;
+                for qt in qts.into_iter() {
+                    let table_id = qt.table_id as usize;
+                    jpeg_header.quant_tables[table_id] = Some(qt)
                 }
             }
 
@@ -56,7 +57,11 @@ impl Decoder {
             if second_byte == DHT {
                 let new_offset = offset + 2;
                 let huffman_table_data = &image_data[new_offset..(new_offset + length as usize)];
-                read_huffman_table(&huffman_table_data)?;
+                read_huffman_table(&huffman_table_data, &mut jpeg_header)?;
+            }
+
+            if second_byte == SOS {
+                break;
             }
 
             offset = offset + length as usize + 2;
@@ -82,9 +87,9 @@ fn read_app0() {
     println!("READ ================> APP0");
 }
 
-fn read_quantization_table<'a>(quantization_data: &'a[u8]) -> Result<Vec<QuantizationTable>, String>{
+fn read_quantization_table<'a>(quantization_data: &'a[u8]) -> Result<Vec<QuantizationTable<'a>>, String>{
     println!("READ ================> DQT");
-    let mut table_datas: Vec<QuantizationTable> = vec![];
+    let mut table_datas: Vec<QuantizationTable<'a>> = vec![];
     let mut offset = 2usize;
     while offset < quantization_data.len() {
         let precision_and_id = quantization_data[offset];
@@ -93,9 +98,10 @@ fn read_quantization_table<'a>(quantization_data: &'a[u8]) -> Result<Vec<Quantiz
         }
         let table_id = precision_and_id & 0xF;
         offset = offset + 1;
-        let slice_qd = &quantization_data[offset..(offset + 64)];
-        let table_data: &[u8; 64] = slice_qd.try_into().expect("slice with incorrect length");
-        table_datas.push(QuantizationTable{table_id, table_data});
+        let slice_qd: &'a [u8] = &quantization_data[offset..(offset + 64)];
+        let table_data: &'a [u8; 64] = slice_qd.try_into().expect("slice with incorrect length");
+        let ben = QuantizationTable{table_id, table_data};
+        table_datas.push(ben);
         offset += 64;
     }   
     
@@ -136,17 +142,37 @@ fn read_frame_header<'a>(frame_header_data: &'a[u8]) -> Result<FrameHeader, Stri
     })
 }
 
-fn read_huffman_table(huffman_data: &[u8]) -> Result<u32, String> {
+fn read_huffman_table<'a>(huffman_data: &'a [u8], header: &mut Header<'a>) -> Result<(), String> {
     println!("READ ================> DHT");
+    // Skipping 2 bytes which is the length of the huffman data
     let mut offset = 2usize;
-    let table_class = (huffman_data[offset] & 0xF0) >> 4;
-    let huffman_id = huffman_data[offset] & 0xF;
-    println!("TABLE CLASS: {}; HUFFMAN ID: {}", table_class, huffman_id);
+    
 
-    offset += 1;
-    let num_of_huffman = huffman_data[offset];
-    println!("NUM OF HUFF: {}", num_of_huffman);
-    Ok(0)
+    let mut huffman_tables: Vec<HuffmanTable> = vec![];
+
+    while offset < huffman_data.len() {
+        let table_class = (huffman_data[offset] & 0xF0) >> 4;
+        let table_id = huffman_data[offset] & 0xF;
+        offset += 1;
+
+        let offsets: &[u8; 16] = huffman_data[offset..(offset + 16)]
+            .as_ref()
+            .try_into().expect("slice with incorrect length");
+        offset += 16;
+
+
+        let all_symbols: u8 = offsets.iter().sum();
+        let symbols: &[u8] = &huffman_data[offset..(offset + all_symbols as usize)];
+        huffman_tables.push(HuffmanTable{table_class, table_id, offsets, symbols});
+
+        if table_class == 1 {
+            header.ac_huffman_tables[table_id as usize] = Some(HuffmanTable{table_class, table_id, offsets, symbols});
+        } else {
+            header.dc_huffman_tables[table_id as usize] = Some(HuffmanTable{table_class, table_id, offsets, symbols});
+        }
+        offset += all_symbols as usize;
+    }
+    Ok(())
 }
 
 fn read_scan_header(scan_data: &[u8])-> Result<u32, String> {
